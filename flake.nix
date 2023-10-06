@@ -22,6 +22,8 @@
           nativeBuildInputs = [ rust-bin.stable.latest.complete pkgsNative.libclang pkgsNative.winePackages.staging];
           buildInputs = [ windows.pthreads windows.mcfgthreads stdenv.cc.libc jansson];
           LIBCLANG_PATH="${pkgsNative.libclang.lib}/lib";
+          WINEPATH="${jansson}/bin;${windows.mcfgthreads}/bin;../thcrap/bin";
+          HOST_SSL_CERT_FILE="${pkgsNative.cacert}/etc/ssl/certs/ca-bundle.crt";
       }) {};
 
   };

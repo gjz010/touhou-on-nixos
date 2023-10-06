@@ -3,3 +3,5 @@ thcrap2nix/target
 .direnv
 thcrap
 repos
+thcrap2nix/bin
+thcrap2nix/repos

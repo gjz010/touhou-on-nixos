@@ -5,6 +5,7 @@
 typedef int BOOL;
 typedef void *PVOID;
 typedef PVOID HANDLE;
+/// <div rustbindgen hide></div>
 typedef void json_t;
 typedef unsigned long DWORD;
 
@@ -151,6 +152,7 @@ BOOL loader_update_with_UI_wrapper(const char *exe_fn, char *args);
 int update_notify_thcrap_wrapper();
 
 repo_t ** RepoDiscover_wrapper(const char *start_url);
-
+patch_t patch_bootstrap_wrapper(const patch_desc_t *sel, const repo_t *repo);
 
 void thcrap_update_exit_wrapper();
+

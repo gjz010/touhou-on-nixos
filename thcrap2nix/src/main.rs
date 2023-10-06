@@ -1,4 +1,6 @@
 mod bindings;
+use bindings::patch_desc_t;
+use bindings::patch_t;
 use bindings::progress_callback_status_t;
 use bindings::progress_callback_t;
 use bindings::repo_t;
@@ -6,6 +8,7 @@ use winapi::{shared::minwindef::{HMODULE, FARPROC}, ctypes::{c_char, c_void}, um
 use winapi::um::errhandlingapi::GetLastError;
 use std::env::current_dir;
 use std::env::set_current_dir;
+use std::env::set_var;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::os::windows::ffi::OsStrExt;
@@ -39,12 +42,68 @@ type PFNPRINT_HOOK = extern "cdecl" fn(*const c_char, len: usize);
 type PFLOG_SET_HOOK = extern "cdecl" fn(PFPRINT_HOOK, PFNPRINT_HOOK);
 
 type PFREPO_FREE = extern "cdecl" fn(repo: *mut repo_t);
+type PFPATCH_BOOTSTRAP_WRAPPER = extern "cdecl" fn (sel: *const patch_desc_t, repo: *const repo_t) -> patch_t;
+
 type Error = u32;
 pub fn str_from_u8_nul_utf8(utf8_src: &[u8]) -> Result<&str, std::str::Utf8Error> {
     let nul_range_end = utf8_src.iter()
         .position(|&c| c == b'\0')
         .unwrap_or(utf8_src.len()); // default to length if no `\0` present
     ::std::str::from_utf8(&utf8_src[0..nul_range_end])
+}
+pub unsafe fn str_from_pi8_nul_utf8<'a>(p: *const i8)->Result<&'a str, std::str::Utf8Error>{
+    let cstr = CStr::from_ptr(p);
+    str_from_u8_nul_utf8(cstr.to_bytes())
+}
+
+struct PatchDesc<'a>{
+    repo: &'a THRepo<'a>,
+    patchdesc: patch_desc_t
+}
+impl<'a> PatchDesc<'a>{
+    pub fn new(repo: &'a THRepo<'a>, patchdesc: patch_desc_t)->Self{
+        Self{repo, patchdesc}
+    }
+    pub fn patch_id(&self)->&str{
+        let patch = self.patchdesc;
+        unsafe{
+            str_from_pi8_nul_utf8(patch.patch_id).unwrap()
+        }
+    }
+}
+
+struct Patch<'a>{
+    repo: &'a THRepo<'a>,
+    patch: patch_t
+}
+
+impl<'a> Patch<'a>{
+    pub fn new(repo: &'a THRepo<'a>, patch: patch_t)->Self{
+        Self{repo, patch}
+    }
+    pub fn patch_id(&self)->&str{
+        unsafe{
+            str_from_pi8_nul_utf8(self.patch.id).unwrap()
+        }
+    }
+    pub fn to_desc(&self)->PatchDesc<'a>{
+        let raw_desc = patch_desc_t{
+            repo_id: self.repo.raw_ref().id,
+            patch_id: self.patch.id
+        };
+        PatchDesc::new(self.repo, raw_desc)
+    }
+    pub fn dependencies(&self)->Vec<PatchDesc<'a>>{
+        let mut descs = vec![];
+        let mut p = self.patch.dependencies;
+        unsafe{
+            while (*p).patch_id!=null_mut(){
+                descs.push(PatchDesc::new(self.repo, *p));
+                p=p.add(1);
+            }
+        }
+        descs
+    }
 }
 
 struct THRepo<'a>{
@@ -75,6 +134,21 @@ impl<'a> THRepo<'a>{
             str_from_u8_nul_utf8(cstr.to_bytes()).unwrap()
         }
     }
+    pub fn patches(&'a self)->Vec<(&'a str, PatchDesc<'a>)>{
+        let repo = self.raw_ref();
+        let mut patches = vec![];
+        let mut p = repo.patches;
+        unsafe{
+            while (*p).patch_id!=null_mut(){
+                patches.push((str_from_pi8_nul_utf8::<'a>((*p).title).unwrap(), PatchDesc::new(self, patch_desc_t { 
+                    repo_id: (*self.repo).id, patch_id: (*p).patch_id 
+                })));
+                p=p.add(1);
+            }
+            
+        }
+        patches
+    }
 }
 impl<'a> Drop for THRepo<'a>{
     fn drop(&mut self) {
@@ -87,7 +161,8 @@ struct THCrapDLL{
     pf_thcrap_update_module: PFTHCRAP_UPDATEMODULE,
     pf_repodiscover_wrapper: PFREPO_DISCOVER_WRAPPER,
     pf_repofree: PFREPO_FREE,
-    pf_log_set_hook: PFLOG_SET_HOOK
+    pf_log_set_hook: PFLOG_SET_HOOK,
+    pf_patch_bootstrap_wrapper: PFPATCH_BOOTSTRAP_WRAPPER
 }
 
 pub extern "cdecl" fn print_hook(s: *const c_char){
@@ -127,7 +202,8 @@ impl THCrapDLL{
                 pf_thcrap_update_module: load_function!("thcrap_update_module"),
                 pf_repodiscover_wrapper: load_function!("RepoDiscover_wrapper"),
                 pf_repofree: load_function!("RepoFree"),
-                pf_log_set_hook: load_function!("log_set_hook")
+                pf_log_set_hook: load_function!("log_set_hook"),
+                pf_patch_bootstrap_wrapper: load_function!("patch_bootstrap_wrapper")
             };
             (val.pf_log_set_hook)(print_hook, nprint_hook);
             let cwd = current_dir().unwrap();
@@ -171,11 +247,17 @@ impl Drop for THCrapDLL{
 }
 fn main() {
     println!("Hello, world!");
+    //set_var("CURLOPT_CAINFO", std::env::var("HOST_SSL_CERT_FILE").unwrap());
     let mut thcrap = THCrapDLL::new();
     let repo_list = thcrap.RepoDiscover_wrapper("https://mirrors.thpatch.net/nmlgc/").unwrap();
     println!("Len = {}", repo_list.len());
     for repo in repo_list.iter(){
-        println!("{}", repo.id());
+        
+        let patches = repo.patches();
+        println!("Repo = {}", repo.id());
+        for p in patches.iter(){
+            println!("  {} {}", p.1.patch_id(), p.0);
+        }
     }
     println!("{:?}", std::env::current_dir().unwrap());
     unsafe{

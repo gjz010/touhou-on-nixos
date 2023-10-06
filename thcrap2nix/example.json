@@ -1,0 +1,11 @@
+{
+    "patches": [
+        {
+            "repo_id": "thpatch",
+            "patch_id": "lang_zh-hans"
+        }
+    ],
+    "games": [
+        "th16"
+    ]
+}

@@ -7,8 +7,13 @@ edition = "2021"
 
 
 [dependencies]
+clap = { version = "4.4.6", features = ["derive"] }
 jansson-sys = "0.1.0"
 libc = "0.2.148"
+log = "0.4.20"
+pretty_env_logger = "0.5.0"
+serde = { version = "1.0.188", features = ["derive"]}
+serde_json = "1.0.107"
 winapi = { version = "0.3.9", features = ["minwindef", "libloaderapi", "errhandlingapi"]}
 [build-dependencies]
 bindgen = "0.68.1"

@@ -1,11 +1,17 @@
 mod bindings;
+mod thcrapdef;
 use bindings::patch_desc_t;
 use bindings::patch_t;
 use bindings::progress_callback_status_t;
 use bindings::progress_callback_t;
 use bindings::repo_t;
+use clap::Parser;
+use clap::arg;
+use clap::command;
+
 use winapi::{shared::minwindef::{HMODULE, FARPROC}, ctypes::{c_char, c_void}, um::libloaderapi::{LoadLibraryA, LoadLibraryW, GetProcAddress, FreeLibrary}};
 use winapi::um::errhandlingapi::GetLastError;
+use std::collections::BTreeMap;
 use std::env::current_dir;
 use std::env::set_current_dir;
 use std::env::set_var;
@@ -17,6 +23,9 @@ use std::ptr::null;
 use std::ptr::null_mut;
 use jansson_sys::*;
 use libc::free;
+
+use crate::thcrapdef::THCrapDef;
+#[macro_use] extern crate log;
 type PFTHCRAP_UPDATEMODULE = extern "cdecl" fn()->HMODULE;
 type PFUPDATE_FILTER_GLOBAL_WRAPPER = extern "cdecl" fn(_fn: *const c_char, *mut c_void);
 type PFUPDATE_FILTER_GAMES_WRAPPER = extern "cdecl" fn(_fn: *const c_char, *mut c_void);
@@ -58,6 +67,13 @@ pub fn str_from_u8_nul_utf8(utf8_src: &[u8]) -> Result<&str, std::str::Utf8Error
 pub unsafe fn str_from_pi8_nul_utf8<'a>(p: *const i8)->Result<&'a str, std::str::Utf8Error>{
     let cstr = CStr::from_ptr(p);
     str_from_u8_nul_utf8(cstr.to_bytes())
+}
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[arg()]
+    json: String
 }
 
 struct PatchDesc<'a>{
@@ -178,13 +194,13 @@ struct THCrapDLL{
 pub extern "cdecl" fn print_hook(s: *const c_char){
     unsafe{
         let s = CStr::from_ptr(s as *const _);
-        print!("{}", str_from_u8_nul_utf8(s.to_bytes()).unwrap())
+        trace!(target: "thcrap_log", "{}", str_from_u8_nul_utf8(s.to_bytes()).unwrap().trim())
     }
 }
 pub extern "cdecl" fn nprint_hook(s: *const c_char, n: usize){
     unsafe{
         let s = std::slice::from_raw_parts(s as *const u8, n);
-        print!("{}", str_from_u8_nul_utf8(s).unwrap())
+        trace!(target: "thcrap_log", "{}", str_from_u8_nul_utf8(s).unwrap().trim())
     }
 }
 
@@ -257,25 +273,33 @@ impl Drop for THCrapDLL{
     }
 }
 fn main() {
-    println!("Hello, world!");
+    let args = Cli::parse();
+    pretty_env_logger::init();
+    info!("thcrap2nix");
+    trace!("{:?}", std::env::current_dir().unwrap());
+    info!("json path = {}", args.json);
+    let file = std::fs::read_to_string(&args.json).unwrap();
+    let json: THCrapDef= serde_json::de::from_str(&file).unwrap();
+    trace!("json = {:?}", &json);
     //set_var("CURLOPT_CAINFO", std::env::var("HOST_SSL_CERT_FILE").unwrap());
     let mut thcrap = THCrapDLL::new();
+    info!("Fetching thcrap repositories.");
     let repo_list = thcrap.RepoDiscover_wrapper("https://mirrors.thpatch.net/nmlgc/").unwrap();
-    println!("Len = {}", repo_list.len());
+    info!("Repo Len = {}", repo_list.len());
+    let mut search_tree : BTreeMap<String, (&THRepo<'_>, BTreeMap<String, PatchDesc<'_>>)> = BTreeMap::new();
     for repo in repo_list.iter(){
-        
+        let mut repo_search_tree = BTreeMap::new();
+        let id = repo.id().to_owned();
         let patches = repo.patches();
-        println!("Repo = {}", repo.id());
-        for p in patches.iter(){
-            println!("  {} {}", p.1.patch_id(), p.0);
-            let fp = p.1.load_patch();
+        info!("Repo = {}", id);
+        for p in patches{
+            info!("  {} {}", p.1.patch_id(), p.0);
+            let pid = p.1.patch_id();
+            repo_search_tree.insert(pid.to_owned(), p.1);
         }
+        search_tree.insert(id, (repo, repo_search_tree));
     }
-    println!("{:?}", std::env::current_dir().unwrap());
-    unsafe{
-        let json = json_object();
-        json_decref(json);
-    }
+    
     
 }
 

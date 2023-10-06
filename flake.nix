@@ -18,7 +18,7 @@
       in 
       pkgs.callPackage ({mkShell, stdenv, rust-bin, windows, jansson}: mkShell {
           #buildInputs = [pkgs.rust-bin.stable.latest.minimal];
-          CARGO_TARGET_I686_PC_WINDOWS_GNU_LINKER = "${stdenv.cc.targetPrefix}cc";
+          #CARGO_TARGET_I686_PC_WINDOWS_GNU_LINKER = "${stdenv.cc.targetPrefix}cc";
           nativeBuildInputs = [ rust-bin.stable.latest.complete pkgsNative.libclang pkgsNative.winePackages.staging];
           buildInputs = [ windows.pthreads windows.mcfgthreads stdenv.cc.libc jansson];
           LIBCLANG_PATH="${pkgsNative.libclang.lib}/lib";

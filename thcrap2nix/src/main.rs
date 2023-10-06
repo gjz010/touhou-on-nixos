@@ -4,6 +4,8 @@ use bindings::progress_callback_t;
 use bindings::repo_t;
 use winapi::{shared::minwindef::{HMODULE, FARPROC}, ctypes::{c_char, c_void}, um::libloaderapi::{LoadLibraryA, LoadLibraryW, GetProcAddress, FreeLibrary}};
 use winapi::um::errhandlingapi::GetLastError;
+use std::env::current_dir;
+use std::env::set_current_dir;
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::os::windows::ffi::OsStrExt;
@@ -91,13 +93,13 @@ struct THCrapDLL{
 pub extern "cdecl" fn print_hook(s: *const c_char){
     unsafe{
         let s = CStr::from_ptr(s as *const _);
-        println!("{}", str_from_u8_nul_utf8(s.to_bytes()).unwrap())
+        print!("{}", str_from_u8_nul_utf8(s.to_bytes()).unwrap())
     }
 }
 pub extern "cdecl" fn nprint_hook(s: *const c_char, n: usize){
     unsafe{
         let s = std::slice::from_raw_parts(s as *const u8, n);
-        println!("{}", str_from_u8_nul_utf8(s).unwrap())
+        print!("{}", str_from_u8_nul_utf8(s).unwrap())
     }
 }
 
@@ -128,7 +130,9 @@ impl THCrapDLL{
                 pf_log_set_hook: load_function!("log_set_hook")
             };
             (val.pf_log_set_hook)(print_hook, nprint_hook);
+            let cwd = current_dir().unwrap();
             val.thcrap_update_module().expect("Failed to load thcrap update module.");
+            set_current_dir(cwd).unwrap();
             return val;
         }
     }

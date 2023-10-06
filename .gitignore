@@ -1,0 +1,5 @@
+**/*.dll
+thcrap2nix/target
+.direnv
+thcrap
+repos

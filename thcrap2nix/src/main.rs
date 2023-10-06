@@ -25,6 +25,13 @@ use std::ptr::null_mut;
 use jansson_sys::*;
 use libc::free;
 
+use crate::bindings::get_status_t_GET_CANCELLED;
+use crate::bindings::get_status_t_GET_CLIENT_ERROR;
+use crate::bindings::get_status_t_GET_CRC32_ERROR;
+use crate::bindings::get_status_t_GET_DOWNLOADING;
+use crate::bindings::get_status_t_GET_OK;
+use crate::bindings::get_status_t_GET_SERVER_ERROR;
+use crate::bindings::get_status_t_GET_SYSTEM_ERROR;
 use crate::thcrapdef::THCrapDef;
 #[macro_use] extern crate log;
 type PFTHCRAP_UPDATEMODULE = extern "cdecl" fn()->HMODULE;
@@ -41,7 +48,7 @@ type PFUPDATE_FILTER_FUNC_T = extern "cdecl" fn(
 type PFSTACK_UPDATE_WRAPPER = extern "cdecl" fn (
     filter_func: PFUPDATE_FILTER_FUNC_T,
     filter_data: *mut ::std::os::raw::c_void,
-    progress_callback: progress_callback_t,
+    progress_callback: PFPROGRESS_CALLBACK_T,
     progress_param: *mut ::std::os::raw::c_void,
 );
 type PFREPO_DISCOVER_WRAPPER = extern "cdecl" fn (start_url: *const ::std::os::raw::c_char) -> *mut *mut repo_t;
@@ -58,6 +65,10 @@ type PFPATCH_INIT = extern "cdecl" fn(
     patch_info: *const json_t,
     level: usize,
 ) -> patch_t;
+
+type PFPATCH_FREE = extern "cdecl" fn (patch: *mut patch_t);
+type PFSTACK_ADD_PATCH = extern "cdecl" fn (patch: *mut patch_t);
+
 type Error = u32;
 pub fn str_from_u8_nul_utf8(utf8_src: &[u8]) -> Result<&str, std::str::Utf8Error> {
     let nul_range_end = utf8_src.iter()
@@ -106,11 +117,12 @@ impl<'a> PatchDesc<'a>{
     }
 
     pub fn load_patch(&self, repo: &'a THRepo<'a>)->Patch<'a>{
-        let p1 = (self.dll.pf_patch_bootstrap_wrapper)(&self.patchdesc as *const _, repo.repo as *const _);
+        let mut p1 = (self.dll.pf_patch_bootstrap_wrapper)(&self.patchdesc as *const _, repo.repo as *const _);
         unsafe {
             info!("Stage 2 for {}/{} archive: {}", str_from_pi8_nul_utf8(self.patchdesc.repo_id).unwrap(), str_from_pi8_nul_utf8(self.patchdesc.patch_id).unwrap(), str_from_pi8_nul_utf8(p1.archive).unwrap());
         }
         let p2 = (self.dll.pf_patch_init)(p1.archive, null(), 0);
+        (repo.thcrap.pf_patch_free)(&mut p1 as *mut _);
         Patch::new(repo, p2)
     }
 }
@@ -135,6 +147,9 @@ impl<'a> Patch<'a>{
             patch_id: self.patch.id
         };
         PatchDesc::new(self.repo.thcrap, raw_desc)
+    }
+    pub fn add_to_stack(&mut self)->(){
+        (self.repo.thcrap.pf_stack_add_patch)(&mut self.patch as *const _ as *mut _);
     }
     pub fn dependencies(&self)->Vec<PatchDesc<'a>>{
         let mut descs = vec![];
@@ -216,7 +231,10 @@ struct THCrapDLL{
     pf_repofree: PFREPO_FREE,
     pf_log_set_hook: PFLOG_SET_HOOK,
     pf_patch_bootstrap_wrapper: PFPATCH_BOOTSTRAP_WRAPPER,
-    pf_patch_init: PFPATCH_INIT
+    pf_patch_init: PFPATCH_INIT,
+    pf_stack_update_wrapper: PFSTACK_UPDATE_WRAPPER,
+    pf_patch_free: PFPATCH_FREE,
+    pf_stack_add_patch: PFSTACK_ADD_PATCH
 }
 
 pub extern "cdecl" fn print_hook(s: *const c_char){
@@ -258,7 +276,10 @@ impl THCrapDLL{
                 pf_repofree: load_function!("RepoFree"),
                 pf_log_set_hook: load_function!("log_set_hook"),
                 pf_patch_bootstrap_wrapper: load_function!("patch_bootstrap_wrapper"),
-                pf_patch_init: load_function!("patch_init")
+                pf_patch_init: load_function!("patch_init"),
+                pf_stack_update_wrapper:load_function!("stack_update_wrapper"),
+                pf_patch_free: load_function!("patch_free"),
+                pf_stack_add_patch: load_function!("stack_add_patch")
             };
             (val.pf_log_set_hook)(print_hook, nprint_hook);
             let cwd = current_dir().unwrap();
@@ -267,14 +288,14 @@ impl THCrapDLL{
             return val;
         }
     }
-    pub fn thcrap_update_module(&mut self)->Option<()>{
+    pub fn thcrap_update_module(&self)->Option<()>{
         let x = (self.pf_thcrap_update_module)();
         if x == std::ptr::null_mut(){
             return None;
         }
         return Some(());
     }
-    pub fn RepoDiscover_wrapper<'a>(&'a mut self, start_url: &str)->Option<Vec<THRepo<'a>>>{
+    pub fn RepoDiscover_wrapper<'a>(&'a self, start_url: &str)->Option<Vec<THRepo<'a>>>{
         unsafe {
             let cstr = CString::new(start_url).unwrap();
             let mut ptr = (self.pf_repodiscover_wrapper)(cstr.as_ptr());
@@ -293,6 +314,34 @@ impl THCrapDLL{
     }
     pub fn RepoFree(&self, repo: *mut repo_t){
         unsafe {(self.pf_repofree)(repo)};
+    }
+    pub fn stack_update_wrapper<F: Fn(&str)->bool, P: Fn(*const progress_callback_status_t)->()>(&self, f: F, p: P){
+        let box_f = Box::<F>::leak(Box::new(f)) as *mut F;
+        let box_p = Box::<P>::leak(Box::new(p)) as *mut P;
+        extern "cdecl" fn filter_wrapper<F: Fn(&str)->bool>(
+            fn_: *const ::std::os::raw::c_char,
+            filter_data: *mut ::std::os::raw::c_void)-> ::std::os::raw::c_int{
+            unsafe {
+                let p_f = &*std::mem::transmute::<_, *const F>(filter_data);
+                let s = str_from_pi8_nul_utf8(fn_).unwrap();
+                if (p_f)(s){
+                    1
+                }else{
+                    0
+                }
+            }
+        }
+        extern "cdecl" fn progress_wrapper<P: Fn(*const progress_callback_status_t)->()>(status: *mut progress_callback_status_t,
+            param: *mut ::std::os::raw::c_void)->bool{
+            let p_p = unsafe {&*std::mem::transmute::<_, *const P>(param)};
+            (p_p)(status);
+            return true;
+        }
+        (self.pf_stack_update_wrapper)(filter_wrapper::<F>, box_f as *mut _, progress_wrapper::<P>, box_p as *mut _);
+        unsafe {
+            drop(Box::<F>::from_raw(box_f));
+            drop(Box::<P>::from_raw(box_p));
+        }
     }
 }
 impl Drop for THCrapDLL{
@@ -357,7 +406,7 @@ fn main() {
         if !installed.contains(&key){
             info!("Installing patch: {}/{}", &key.0, &key.1);
             let (repo, current_repo_tree) = search_tree.get(&key.0).unwrap();
-            let patch = patch_desc.load_patch(repo);
+            let mut patch = patch_desc.load_patch(repo);
             for mut dep in patch.dependencies(){
                 // First try to resolve relative.
                 if !dep.absolute(){
@@ -394,6 +443,7 @@ fn main() {
                     has_error = true;
                 }
             }
+            patch.add_to_stack();
             installed.insert(key);
         }else{
             debug!("Dependency already resolved: {}/{}", &key.0, &key.1);
@@ -401,8 +451,62 @@ fn main() {
     }
     if has_error{
         error!("Failure detected during patch dependency resolution.");
-        std::process::exit(1);
+        std::process::exit(2);
     }
+    trace!("Downloading game patches.");
+    let has_error = std::sync::atomic::AtomicBool::new(false);
+    thcrap.stack_update_wrapper(|name|{
+        trace!("Filter processing {}", name);
+        return !name.contains('/');
+    }, |progress|{
+        unsafe {
+            let prog =&*progress;
+            let patch = str_from_pi8_nul_utf8((*prog.patch).id).unwrap();
+            let file =  str_from_pi8_nul_utf8(prog.fn_).unwrap();
+            match prog.status{
+                get_status_t_GET_DOWNLOADING=>{
+                    let url = str_from_pi8_nul_utf8(prog.url).unwrap();
+                    trace!("{} {} {}/{} Downloading from URL {}", patch, prog.file_progress, prog.file_size, file, url);
+                }
+                get_status_t_GET_OK=>{
+                    trace!("{} {} Downloaded", patch, file);
+                }
+                get_status_t_GET_CLIENT_ERROR=>{
+                    let error =  str_from_pi8_nul_utf8(prog.error).unwrap();
+                    error!("{} {} Client error {}", patch, file, error);
+                    has_error.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                get_status_t_GET_SERVER_ERROR=>{
+                    let error =  str_from_pi8_nul_utf8(prog.error).unwrap();
+                    error!("{} {} Server error {}", patch, file, error);
+                    has_error.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                get_status_t_GET_SYSTEM_ERROR=>{
+                    let error =  str_from_pi8_nul_utf8(prog.error).unwrap();
+                    error!("{} {} System error {}", patch, file, error);
+                    has_error.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                get_status_t_GET_CRC32_ERROR=>{
+                    error!("{} {} CRC32 error", patch, file);
+                    has_error.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                get_status_t_GET_CANCELLED=>{
+                    trace!("{} {} Cancelled", patch, file);
+                }
+                _=>{
+
+                }
+            }
+        
+        }
+    });
+    if has_error.load(std::sync::atomic::Ordering::Relaxed){
+        error!("Failure detected while downloading.");
+        std::process::exit(3);
+    }
+
+    info!("thcrap update finished.")
+    //thcrap.
 }
 
 #[no_mangle]

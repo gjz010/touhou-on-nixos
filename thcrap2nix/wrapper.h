@@ -159,3 +159,6 @@ void thcrap_update_exit_wrapper();
 
 ///////////////////
 patch_t patch_init(const char *patch_path, const json_t *patch_info, size_t level);
+
+void stack_add_patch(patch_t *patch);
+void patch_free(patch_t *patch);

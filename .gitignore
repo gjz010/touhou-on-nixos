@@ -5,3 +5,4 @@ thcrap
 repos
 thcrap2nix/bin
 thcrap2nix/repos
+**/*.log

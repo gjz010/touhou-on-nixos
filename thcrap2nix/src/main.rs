@@ -43,7 +43,11 @@ type PFLOG_SET_HOOK = extern "cdecl" fn(PFPRINT_HOOK, PFNPRINT_HOOK);
 
 type PFREPO_FREE = extern "cdecl" fn(repo: *mut repo_t);
 type PFPATCH_BOOTSTRAP_WRAPPER = extern "cdecl" fn (sel: *const patch_desc_t, repo: *const repo_t) -> patch_t;
-
+type PFPATCH_INIT = extern "cdecl" fn(
+    patch_path: *const ::std::os::raw::c_char,
+    patch_info: *const json_t,
+    level: usize,
+) -> patch_t;
 type Error = u32;
 pub fn str_from_u8_nul_utf8(utf8_src: &[u8]) -> Result<&str, std::str::Utf8Error> {
     let nul_range_end = utf8_src.iter()
@@ -69,6 +73,11 @@ impl<'a> PatchDesc<'a>{
         unsafe{
             str_from_pi8_nul_utf8(patch.patch_id).unwrap()
         }
+    }
+    pub fn load_patch(&self)->Patch<'a>{
+        let p1 = (self.repo.thcrap.pf_patch_bootstrap_wrapper)(&self.patchdesc as *const _, self.repo.repo as *const _);
+        let p2 = (self.repo.thcrap.pf_patch_init)(p1.archive, null(), 0);
+        Patch::new(self.repo, p2)
     }
 }
 
@@ -162,7 +171,8 @@ struct THCrapDLL{
     pf_repodiscover_wrapper: PFREPO_DISCOVER_WRAPPER,
     pf_repofree: PFREPO_FREE,
     pf_log_set_hook: PFLOG_SET_HOOK,
-    pf_patch_bootstrap_wrapper: PFPATCH_BOOTSTRAP_WRAPPER
+    pf_patch_bootstrap_wrapper: PFPATCH_BOOTSTRAP_WRAPPER,
+    pf_patch_init: PFPATCH_INIT
 }
 
 pub extern "cdecl" fn print_hook(s: *const c_char){
@@ -203,7 +213,8 @@ impl THCrapDLL{
                 pf_repodiscover_wrapper: load_function!("RepoDiscover_wrapper"),
                 pf_repofree: load_function!("RepoFree"),
                 pf_log_set_hook: load_function!("log_set_hook"),
-                pf_patch_bootstrap_wrapper: load_function!("patch_bootstrap_wrapper")
+                pf_patch_bootstrap_wrapper: load_function!("patch_bootstrap_wrapper"),
+                pf_patch_init: load_function!("patch_init")
             };
             (val.pf_log_set_hook)(print_hook, nprint_hook);
             let cwd = current_dir().unwrap();
@@ -257,6 +268,7 @@ fn main() {
         println!("Repo = {}", repo.id());
         for p in patches.iter(){
             println!("  {} {}", p.1.patch_id(), p.0);
+            let fp = p.1.load_patch();
         }
     }
     println!("{:?}", std::env::current_dir().unwrap());

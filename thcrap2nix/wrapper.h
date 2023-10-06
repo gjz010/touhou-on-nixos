@@ -156,3 +156,6 @@ patch_t patch_bootstrap_wrapper(const patch_desc_t *sel, const repo_t *repo);
 
 void thcrap_update_exit_wrapper();
 
+
+///////////////////
+patch_t patch_init(const char *patch_path, const json_t *patch_info, size_t level);

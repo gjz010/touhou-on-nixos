@@ -37,9 +37,6 @@ struct Cli {
 
 fn main() {
     let args = Cli::parse();
-    set_var("RUST_LOG", "trace");
-    set_var("http_proxy", "http://192.168.76.1:30086");
-    set_var("https_proxy", "http://192.168.76.1:30086");
     pretty_env_logger::init();
     info!("thcrap2nix");
     trace!("{:?}", std::env::current_dir().unwrap());
@@ -47,7 +44,6 @@ fn main() {
     let file = std::fs::read_to_string(&args.json).unwrap();
     let def: THCrapDef = serde_json::de::from_str(&file).unwrap();
     trace!("json = {:?}", &def);
-    //set_var("CURLOPT_CAINFO", std::env::var("HOST_SSL_CERT_FILE").unwrap());
     let thcrap = THCrapDLL::new();
     info!("Fetching thcrap repositories.");
     let repo_list = thcrap
@@ -163,8 +159,16 @@ fn main() {
         |name| {
             let mut xs = file_list.lock().unwrap();
             xs.push(name.to_owned());
-            //trace!("Filter processing {}", name);
-            return !name.contains('/');
+            if !name.contains("/"){
+                return true;
+            }
+            for game in def.games.iter(){
+                if name.starts_with(&format!("{}/", game)){
+                    return true;
+                }
+            }
+
+            return false;
         },
         |progress| unsafe {
             let prog = &*progress;

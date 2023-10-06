@@ -12,6 +12,7 @@ use clap::command;
 use winapi::{shared::minwindef::{HMODULE, FARPROC}, ctypes::{c_char, c_void}, um::libloaderapi::{LoadLibraryA, LoadLibraryW, GetProcAddress, FreeLibrary}};
 use winapi::um::errhandlingapi::GetLastError;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::env::current_dir;
 use std::env::set_current_dir;
 use std::env::set_var;
@@ -65,6 +66,7 @@ pub fn str_from_u8_nul_utf8(utf8_src: &[u8]) -> Result<&str, std::str::Utf8Error
     ::std::str::from_utf8(&utf8_src[0..nul_range_end])
 }
 pub unsafe fn str_from_pi8_nul_utf8<'a>(p: *const i8)->Result<&'a str, std::str::Utf8Error>{
+    assert_ne!(p, null());
     let cstr = CStr::from_ptr(p);
     str_from_u8_nul_utf8(cstr.to_bytes())
 }
@@ -76,13 +78,14 @@ struct Cli {
     json: String
 }
 
+#[derive(Copy, Clone)]
 struct PatchDesc<'a>{
-    repo: &'a THRepo<'a>,
+    dll: &'a THCrapDLL,
     patchdesc: patch_desc_t
 }
 impl<'a> PatchDesc<'a>{
-    pub fn new(repo: &'a THRepo<'a>, patchdesc: patch_desc_t)->Self{
-        Self{repo, patchdesc}
+    pub fn new(dll: &'a THCrapDLL, patchdesc: patch_desc_t)->Self{
+        Self{dll, patchdesc}
     }
     pub fn patch_id(&self)->&str{
         let patch = self.patchdesc;
@@ -90,10 +93,25 @@ impl<'a> PatchDesc<'a>{
             str_from_pi8_nul_utf8(patch.patch_id).unwrap()
         }
     }
-    pub fn load_patch(&self)->Patch<'a>{
-        let p1 = (self.repo.thcrap.pf_patch_bootstrap_wrapper)(&self.patchdesc as *const _, self.repo.repo as *const _);
-        let p2 = (self.repo.thcrap.pf_patch_init)(p1.archive, null(), 0);
-        Patch::new(self.repo, p2)
+    pub fn repo_id(&self)->Option<&str>{
+        if self.patchdesc.repo_id == null_mut(){
+            return None;
+        }
+        unsafe{
+            Some(str_from_pi8_nul_utf8(self.patchdesc.repo_id).unwrap())
+        }
+    }
+    pub fn absolute(&self)->bool{
+        self.patchdesc.repo_id!=null_mut()
+    }
+
+    pub fn load_patch(&self, repo: &'a THRepo<'a>)->Patch<'a>{
+        let p1 = (self.dll.pf_patch_bootstrap_wrapper)(&self.patchdesc as *const _, repo.repo as *const _);
+        unsafe {
+            info!("Stage 2 for {}/{} archive: {}", str_from_pi8_nul_utf8(self.patchdesc.repo_id).unwrap(), str_from_pi8_nul_utf8(self.patchdesc.patch_id).unwrap(), str_from_pi8_nul_utf8(p1.archive).unwrap());
+        }
+        let p2 = (self.dll.pf_patch_init)(p1.archive, null(), 0);
+        Patch::new(repo, p2)
     }
 }
 
@@ -116,14 +134,21 @@ impl<'a> Patch<'a>{
             repo_id: self.repo.raw_ref().id,
             patch_id: self.patch.id
         };
-        PatchDesc::new(self.repo, raw_desc)
+        PatchDesc::new(self.repo.thcrap, raw_desc)
     }
     pub fn dependencies(&self)->Vec<PatchDesc<'a>>{
         let mut descs = vec![];
         let mut p = self.patch.dependencies;
+        if p==null_mut(){
+            return descs;
+        }
         unsafe{
             while (*p).patch_id!=null_mut(){
-                descs.push(PatchDesc::new(self.repo, *p));
+                /*trace!("{}",
+                    str_from_pi8_nul_utf8((*p).patch_id).unwrap()
+                );*/
+                //assert_ne!((*p).repo_id, null_mut());
+                descs.push(PatchDesc::new(self.repo.thcrap, *p));
                 p=p.add(1);
             }
         }
@@ -163,9 +188,12 @@ impl<'a> THRepo<'a>{
         let repo = self.raw_ref();
         let mut patches = vec![];
         let mut p = repo.patches;
+        if p==null_mut(){
+            return patches;
+        }
         unsafe{
             while (*p).patch_id!=null_mut(){
-                patches.push((str_from_pi8_nul_utf8::<'a>((*p).title).unwrap(), PatchDesc::new(self, patch_desc_t { 
+                patches.push((str_from_pi8_nul_utf8::<'a>((*p).title).unwrap(), PatchDesc::new(self.thcrap, patch_desc_t { 
                     repo_id: (*self.repo).id, patch_id: (*p).patch_id 
                 })));
                 p=p.add(1);
@@ -274,13 +302,16 @@ impl Drop for THCrapDLL{
 }
 fn main() {
     let args = Cli::parse();
+    set_var("RUST_LOG", "trace");
+    set_var("http_proxy", "http://192.168.76.1:30086");
+    set_var("https_proxy", "http://192.168.76.1:30086");
     pretty_env_logger::init();
     info!("thcrap2nix");
     trace!("{:?}", std::env::current_dir().unwrap());
     info!("json path = {}", args.json);
     let file = std::fs::read_to_string(&args.json).unwrap();
-    let json: THCrapDef= serde_json::de::from_str(&file).unwrap();
-    trace!("json = {:?}", &json);
+    let def : THCrapDef= serde_json::de::from_str(&file).unwrap();
+    trace!("json = {:?}", &def);
     //set_var("CURLOPT_CAINFO", std::env::var("HOST_SSL_CERT_FILE").unwrap());
     let mut thcrap = THCrapDLL::new();
     info!("Fetching thcrap repositories.");
@@ -299,8 +330,79 @@ fn main() {
         }
         search_tree.insert(id, (repo, repo_search_tree));
     }
-    
-    
+    info!("Collecting patches.");
+    let mut has_error = false;
+    let mut installed: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut remaining = vec![];
+    for patch in def.patches.iter(){
+        if let Some((repo, tree)) = search_tree.get(&patch.repo_id){
+            if let Some(desc) = tree.get(&patch.patch_id){
+                remaining.push(*desc);
+            }else{
+                error!("Missing patch: {}/{}", &patch.repo_id, &patch.patch_id);
+                has_error = true;
+            }
+        }else{
+            error!("Missing repo id: {}", &patch.repo_id);
+            has_error = true;
+        }
+    }
+    if has_error{
+        error!("Some specified patches are missing.");
+        std::process::exit(1);
+    }
+    let mut has_error = false;
+    while let Some(patch_desc) = remaining.pop(){
+        let key = (patch_desc.repo_id().unwrap().to_owned(), patch_desc.patch_id().to_owned());
+        if !installed.contains(&key){
+            info!("Installing patch: {}/{}", &key.0, &key.1);
+            let (repo, current_repo_tree) = search_tree.get(&key.0).unwrap();
+            let patch = patch_desc.load_patch(repo);
+            for mut dep in patch.dependencies(){
+                // First try to resolve relative.
+                if !dep.absolute(){
+                    trace!("Resolving relative dependency: {} relative to {}", dep.patch_id(), &key.0);
+                    let did = dep.patch_id();
+                    if current_repo_tree.contains_key(did){
+                        trace!("Relative dependency resolved by current repo.");
+                        dep.patchdesc.repo_id = patch_desc.patchdesc.repo_id;
+                    }else{
+                        trace!("Relative dependency resolving by all repos.");
+                        for repo in search_tree.iter(){
+                            if repo.1.1.contains_key(did){
+                                trace!("Relative dependency resolved by repo: {}", repo.0);
+                                unsafe {dep.patchdesc.repo_id = (*repo.1.0.repo).id};
+                                break;
+                            }
+                        }
+                    }
+                }
+                if dep.absolute(){
+                    if let Some((repo, tree)) = search_tree.get(dep.repo_id().unwrap()){
+                        if let Some(desc) = tree.get(dep.patch_id()){
+                            remaining.push(*desc);
+                        }else{
+                            error!("Missing patch dependency: {}/{}", &dep.repo_id().unwrap(), &dep.patch_id());
+                            has_error = true;
+                        }
+                    }else{
+                        error!("Missing repo id: {}", &dep.repo_id().unwrap());
+                        has_error = true;
+                    }
+                }else{
+                    error!("Unresolved relative dependency: {}!", dep.patch_id());
+                    has_error = true;
+                }
+            }
+            installed.insert(key);
+        }else{
+            debug!("Dependency already resolved: {}/{}", &key.0, &key.1);
+        }
+    }
+    if has_error{
+        error!("Failure detected during patch dependency resolution.");
+        std::process::exit(1);
+    }
 }
 
 #[no_mangle]

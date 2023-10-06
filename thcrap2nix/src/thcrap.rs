@@ -75,7 +75,7 @@ impl<'a> PatchDesc<'a> {
         self.patchdesc.repo_id != null_mut()
     }
 
-    pub fn load_patch(&self, repo: &'a THRepo<'a>) -> Patch<'a> {
+    pub fn load_patch(&self, repo: &'a THRepo<'a>) -> (String, Patch<'a>) {
         let mut p1 = (self.dll.pf_patch_bootstrap_wrapper)(
             &self.patchdesc as *const _,
             repo.repo as *const _,
@@ -88,9 +88,10 @@ impl<'a> PatchDesc<'a> {
                 str_from_pi8_nul_utf8(p1.archive).unwrap()
             );
         }
+        let archive = unsafe {str_from_pi8_nul_utf8(p1.archive).unwrap()}.to_owned();
         let p2 = (self.dll.pf_patch_init)(p1.archive, null(), 0);
         (repo.thcrap.pf_patch_free)(&mut p1 as *mut _);
-        Patch::new(repo, p2)
+        (archive, Patch::new(repo, p2))
     }
 }
 

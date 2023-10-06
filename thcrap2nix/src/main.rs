@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use std::env::set_var;
+use std::sync::Mutex;
 
 #[macro_use]
 extern crate log;
@@ -23,6 +24,7 @@ use crate::bindings::get_status_t_GET_SYSTEM_ERROR;
 use crate::thcrap::PatchDesc;
 use crate::thcrap::THCrapDLL;
 use crate::thcrap::THRepo;
+use crate::thcrapdef::THCrapConfig;
 use crate::thcrapdef::THCrapDef;
 use crate::utils::str_from_pi8_nul_utf8;
 
@@ -88,6 +90,7 @@ fn main() {
         std::process::exit(1);
     }
     let mut has_error = false;
+    let mut archives = vec![];
     while let Some(patch_desc) = remaining.pop() {
         let key = (
             patch_desc.repo_id().unwrap().to_owned(),
@@ -96,7 +99,7 @@ fn main() {
         if !installed.contains(&key) {
             info!("Installing patch: {}/{}", &key.0, &key.1);
             let (repo, current_repo_tree) = search_tree.get(&key.0).unwrap();
-            let mut patch = patch_desc.load_patch(repo);
+            let (archive, mut patch) = patch_desc.load_patch(repo);
             for mut dep in patch.dependencies() {
                 // First try to resolve relative.
                 if !dep.absolute() {
@@ -142,6 +145,7 @@ fn main() {
                 }
             }
             patch.add_to_stack();
+            archives.push(archive);
             installed.insert(key);
         } else {
             debug!("Dependency already resolved: {}/{}", &key.0, &key.1);
@@ -152,9 +156,13 @@ fn main() {
         std::process::exit(2);
     }
     trace!("Downloading game patches.");
+    let file_list: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let touched_file_list: Mutex<Vec<String>> = Mutex::new(Vec::new());
     let has_error = std::sync::atomic::AtomicBool::new(false);
     thcrap.stack_update_wrapper(
         |name| {
+            let mut xs = file_list.lock().unwrap();
+            xs.push(name.to_owned());
             //trace!("Filter processing {}", name);
             return !name.contains('/');
         },
@@ -175,6 +183,9 @@ fn main() {
                     );
                 }
                 get_status_t_GET_OK => {
+                    let url = str_from_pi8_nul_utf8(prog.url).unwrap();
+                    let mut touched_file_list = touched_file_list.lock().unwrap();
+                    touched_file_list.push(url.to_owned());
                     trace!("{} {} Downloaded", patch, file);
                 }
                 get_status_t_GET_CLIENT_ERROR => {
@@ -207,7 +218,11 @@ fn main() {
         error!("Failure detected while downloading.");
         std::process::exit(3);
     }
-
+    let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    std::fs::write(format!("file_list_{}.log", time), file_list.into_inner().unwrap().join("\n")).unwrap();
+    std::fs::write(format!("download_list_{}.log", time), touched_file_list.into_inner().unwrap().join("\n")).unwrap();
+    let config_json = serde_json::to_string(&THCrapConfig::from_patches(archives)).unwrap();
+    std::fs::write("thcrap2nix.js", config_json).unwrap();
     info!("thcrap update finished.")
     //thcrap.
 }

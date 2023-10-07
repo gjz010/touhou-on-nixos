@@ -7,3 +7,4 @@ thcrap2nix/bin
 thcrap2nix/repos
 **/*.log
 thcrap2nix/thcrap2nix.js
+**/result

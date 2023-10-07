@@ -1,6 +1,7 @@
 [build]
-rustflags = ["-C", "panic=abort"]
+rustflags = ["-C", "panic=abort", "--print", "link-args"]
 target = "i686-pc-windows-gnu"
 [target.i686-pc-windows-gnu]
 linker = "i686-w64-mingw32-gcc"
 runner = "wine"
+rustflags = ["-C", "target-feature=-crt-static", "-C", "panic=abort", "--print", "link-args"]

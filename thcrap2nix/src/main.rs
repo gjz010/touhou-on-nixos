@@ -213,6 +213,7 @@ fn main() {
                 }
                 get_status_t_GET_CANCELLED => {
                     trace!("{} {} Cancelled", patch, file);
+                    //has_error.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
                 _ => {}
             }

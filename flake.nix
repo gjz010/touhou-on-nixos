@@ -334,6 +334,11 @@
           thcrapPatches = (p: with p; [lang_zh-hans]);
           thcrapSha256 = "6Z32LxSWnAZRe7zeCsABQUNSfXOoLoaKdnpZrg4a9Fc=";
         };
+        th10 = touhouTools.makeTouhouOverlay {
+          thVersion = "th10";
+          thcrapPatches = (p: with p; [lang_zh-hans]);
+          thcrapSha256 = "c2ixIvUFFZCWnuCNM/T6a08bYv6dwUJFbbhCccFLNj8=";
+        };
         th18 = touhouTools.makeTouhouOverlay {
           thVersion = "th18";
           thcrapPatches = (p: with p; [lang_zh-hans]);

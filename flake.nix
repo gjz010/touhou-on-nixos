@@ -21,12 +21,28 @@
     packages.x86_64-linux = rec {
       thcrap2nix = pkgsWin.callPackage ./thcrap2nix {winePackageNative = pkgs.winePackages.staging; inherit gitignoreSource; };
       touhouTools = rec {
-        makeWinePrefix = ({
+        makeWinePrefix = {
           defaultFont? "Noto Sans CJK SC",
           fontPackage?  pkgs.noto-fonts-cjk-sans
-        }: pkgs.stdenvNoCC.mkDerivation {
-          
-        });
+        }:
+        (pkgs.callPackage ({stdenvNoCC, wine, pkgsCross, bash}:  stdenvNoCC.mkDerivation {
+          name = "touhou-wineprefix";
+          nativeBuildInputs = [wine];
+          phases = ["installPhase"];
+          installPhase = ''
+          export WINEPREFIX=$out/share/wineprefix
+          mkdir -p $WINEPREFIX
+          wineboot -i
+          wineserver --wait || true
+          echo Setting up dxvk.
+          dxvk32_dir=${pkgsCross.mingw32.dxvk_2}/bin mcfgthreads32_dir=${pkgsCross.mingw32.windows.mcfgthreads_pre_gcc_13}/bin ${bash}/bin/bash ${./setup_dxvk.sh}
+          echo dxvk installed.
+          wineserver --wait || true
+          echo "${defaultFont}" > $out/share/wineprefix/default_font.txt
+          find ${fontPackage} -type f -name "*.ttc" -exec cp {} $out/share/wineprefix/drive_c/windows/Fonts/ \;
+          '';
+        }) {});
+        defaultWinePrefix = makeWinePrefix {};
         makeTouhou = {
           thVersion,
           name? thVersion,
@@ -35,9 +51,10 @@
           thcrapPatches? null,
           thcrapSha256? "",
           baseDrv? null,
+          winePrefix? defaultWinePrefix
         }: 
 
-        pkgs.callPackage ({stdenvNoCC, lib, bash, makeWrapper, writeScript, wine, bubblewrap}: 
+        pkgs.callPackage ({stdenvNoCC, lib, bash, makeWrapper, writeScript, wine, bubblewrap, iconv, dxvk}: 
         let pkgname = "${name}-wrapper";
         in
         stdenvNoCC.mkDerivation {
@@ -61,13 +78,17 @@
           enableBase = baseDrv!=null;
           launcherScriptBwrap = writeScript "${pkgname}-script-bwrap" ''
           #!${bash}/bin/bash
+          export PATH=${wine}/bin:$PATH
           touhouRoot="$wrapperRoot/base"
           mutableBase="$HOME/.config/.touhou-on-nixos/${name}"
           if [ -z "$enableBase" ]; then
             touhouRoot="$PWD"
           fi
+          wineprefixMount="--bind $WINEPREFIX /opt/wineprefix"
           if [ -z "$WINEPREFIX" ]; then
-            WINEPREFIX="$mutableBase/.wine"
+            WINEPREFIX="${winePrefix}/share/wineprefix"
+            export COPY_WINEPREFIX=1
+            wineprefixMount="--ro-bind $WINEPREFIX /opt/wineprefix"
           fi
           mkdir -p "$mutableBase"
           touch "$mutableBase/score.dat"
@@ -92,12 +113,16 @@
             touhouBaseMount="--ro-bind \"$f\" \"/opt/touhou/$fbase\" $touhouBaseMount"
           done
           mutableMount="--bind \"$mutableBase/score.dat\" /opt/touhou/score.dat --bind \"$mutableBase/${thVersion}.cfg\" /opt/touhou/${thVersion}.cfg"
+          if [ ${thVersion} == "th18" ]; then
+            mkdir -p "$mutableBase/appdata"
+            mutableMount="--bind \"$mutableBase/appdata\" /opt/ShanghaiAlice/th18"
+          fi
           bash -c "LAUNCH_WITH_BWRAP=1 XAUTHORITY=/opt/.Xauthority WINEPREFIX=/opt/wineprefix ${bubblewrap}/bin/bwrap \
-            --ro-bind /nix /nix --proc /proc --dev /dev --ro-bind /sys /sys --tmpfs /tmp --tmpfs /opt \
-            --ro-bind $WINEPREFIX /opt/wineprefix \
+            --ro-bind /nix /nix --proc /proc --dev /dev --bind /sys /sys --tmpfs /tmp --tmpfs /opt \
+            $wineprefixMount \
             --ro-bind $XAUTHORITY /opt/.Xauthority \
             --ro-bind /tmp/.X11-unix /tmp/.X11-unix \
-            --ro-bind /run /run \
+            --ro-bind /run /run --ro-bind /bin /bin \
             $touhouBaseMount $thcrapMount $thpracMount $vpatchMount $mutableMount \
             --chdir /opt/touhou \
             $wrapperPath/bin/${pkgname}-raw"
@@ -118,6 +143,31 @@
               ln -s $wrapperRoot/vpatch.exe "$LAUNCHPATH/vpatch.exe"
               ln -s $wrapperRoot/vpatch*.dll "$LAUNCHPATH/"
             fi
+          fi
+          if ! [ -z $COPY_WINEPREFIX ]; then
+            echo "Copying wineprefix."
+            cp -r $WINEPREFIX /tmp/wineprefix
+            chmod -R 777 /tmp/wineprefix
+            WINEPREFIX=/tmp/wineprefix
+            ls -alh $WINEPREFIX
+            if [ -e $WINEPREFIX/default_font.txt ]; then
+              font=$(cat $WINEPREFIX/default_font.txt)
+              echo Setting font to $font
+              regc="REGEDIT4
+
+[HKEY_CURRENT_USER\\Software\\Wine\\Fonts\\Replacements]
+\"PMingLiU\"=\"$font\"
+\"ＭＳ ゴシック\"=\"$font\"
+"
+
+              echo -e -n "\xff\xfe" > "/tmp/thcfg.reg"
+              ${iconv}/bin/iconv --from-code UTF-8 --to-code UTF-16LE <(echo "$regc") >> "/tmp/thcfg.reg"
+
+              ${wine}/bin/wine regedit "/tmp/thcfg.reg"
+            fi
+            #echo Setting up dxvk.
+            #${dxvk}/bin/setup_dxvk.sh install
+            #echo dxvk installed.
           fi
           # Set executable.
           if ! [ -z $enableThprac ]; then
@@ -181,7 +231,7 @@
             --set enableBase "$enableBase"
           echo Done.
           '';
-        }) {wine = pkgs.winePackages.staging; };
+        }) { };
         vpatch = pkgs.callPackage ({stdenvNoCC, unzip, fetchurl}:
           stdenvNoCC.mkDerivation{
             name = "vsyncpatch-bin";

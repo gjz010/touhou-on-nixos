@@ -2,12 +2,12 @@
 
 declare -A dlls=(
     [d3d9]="dxvk/d3d9.dll"
-    [d3d10]="dxvk/d3d10.dll dxvk/d3d10_1.dll dxvk/d3d10core.dll"
+    [d3d10]="dxvk/d3d10core.dll"
     [d3d11]="dxvk/d3d11.dll"
     [dxgi]="dxvk/dxgi.dll"
     [mcfgthreads]="mcfgthreads/mcfgthread-12.dll"
 )
-declare -A targets=([d3d9]=1 [d3d11]=1 [dxgi]=1 [mcfgthreads]=1)
+declare -A targets=([d3d9]=1 [d3d11]=1 [dxgi]=1 [d3d10]=1 [mcfgthreads]=1)
 
 install_file() {
     $do_symlink && file_cmd="ln -sv" || file_cmd="install -m 755 -v"

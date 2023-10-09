@@ -1,7 +1,7 @@
 {
   description = "A very basic flake";
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
     gitignore = {
@@ -118,11 +118,11 @@
             mutableMount="--bind \"$mutableBase/appdata\" /opt/ShanghaiAlice/th18"
           fi
           bash -c "LAUNCH_WITH_BWRAP=1 XAUTHORITY=/opt/.Xauthority WINEPREFIX=/opt/wineprefix ${bubblewrap}/bin/bwrap \
-            --ro-bind /nix /nix --proc /proc --dev /dev --bind /sys /sys --tmpfs /tmp --tmpfs /opt \
+            --ro-bind /nix /nix --proc /proc --dev-bind /dev /dev --bind /sys /sys --tmpfs /tmp --tmpfs /opt \
             $wineprefixMount \
             --ro-bind $XAUTHORITY /opt/.Xauthority \
             --ro-bind /tmp/.X11-unix /tmp/.X11-unix \
-            --ro-bind /run /run --ro-bind /bin /bin \
+            --bind /run /run --ro-bind /var /var --ro-bind /bin /bin \
             $touhouBaseMount $thcrapMount $thpracMount $vpatchMount $mutableMount \
             --chdir /opt/touhou \
             $wrapperPath/bin/${pkgname}-raw"

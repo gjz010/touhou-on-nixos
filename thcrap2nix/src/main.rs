@@ -9,7 +9,9 @@ use clap::Parser;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
+use std::collections::VecDeque;
 use std::env::set_var;
+use std::env::var;
 use std::sync::Mutex;
 
 #[macro_use]
@@ -64,14 +66,18 @@ fn main() {
         }
         search_tree.insert(id, (repo, repo_search_tree));
     }
+    // Before collecting patches, use thcrap mirror only.
+    set_var("http_proxy", var("patch_http_proxy").unwrap());
+    set_var("https_proxy", var("patch_https_proxy").unwrap());
+    set_var("NO_PROXY", var("patch_NO_PROXY").unwrap());
     info!("Collecting patches.");
     let mut has_error = false;
     let mut installed: BTreeSet<(String, String)> = BTreeSet::new();
-    let mut remaining = vec![];
+    let mut remaining = VecDeque::new();
     for patch in def.patches.iter() {
         if let Some((_repo, tree)) = search_tree.get(&patch.repo_id) {
             if let Some(desc) = tree.get(&patch.patch_id) {
-                remaining.push(*desc);
+                remaining.push_back(*desc);
             } else {
                 error!("Missing patch: {}/{}", &patch.repo_id, &patch.patch_id);
                 has_error = true;
@@ -87,7 +93,7 @@ fn main() {
     }
     let mut has_error = false;
     let mut archives = vec![];
-    while let Some(patch_desc) = remaining.pop() {
+    while let Some(patch_desc) = remaining.pop_front() {
         let key = (
             patch_desc.repo_id().unwrap().to_owned(),
             patch_desc.patch_id().to_owned(),
@@ -122,7 +128,7 @@ fn main() {
                 if dep.absolute() {
                     if let Some((repo, tree)) = search_tree.get(dep.repo_id().unwrap()) {
                         if let Some(desc) = tree.get(dep.patch_id()) {
-                            remaining.push(*desc);
+                            remaining.push_back(*desc);
                         } else {
                             error!(
                                 "Missing patch dependency: {}/{}",
@@ -223,6 +229,7 @@ fn main() {
         error!("Failure detected while downloading.");
         std::process::exit(3);
     }
+    archives.reverse();
     let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     std::fs::write(format!("file_list_{}.log", time), file_list.into_inner().unwrap().join("\n")).unwrap();
     std::fs::write(format!("download_list_{}.log", time), touched_file_list.into_inner().unwrap().join("\n")).unwrap();

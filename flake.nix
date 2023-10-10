@@ -21,6 +21,65 @@
     packages.x86_64-linux = rec {
       thcrap2nix = pkgsWin.callPackage ./thcrap2nix {winePackageNative = pkgs.winePackages.staging; inherit gitignoreSource; };
       touhouTools = rec {
+        touhouMetadata = {
+          th06 = {
+            mutable = { type = "relative"; paths = ["東方紅魔郷.cfg" "score.dat" "replay/" "log.txt"];};
+          };
+          th07 = {
+            mutable = { type = "relative"; paths = ["th07.cfg" "score.dat" "replay/" "log.txt"];};
+          };
+          th08 = {
+            mutable = { type = "relative"; paths = ["th08.cfg" "score.dat" "replay/" "log.txt"];};
+          };
+          th09 = {
+            mutable = { type = "relative"; paths = ["th09.cfg" "score.dat" "replay/" "log.txt"];};
+          };
+          th095 = {
+            mutable = { type = "relative"; paths = ["th095.cfg" "scoreth095.dat" "replay/" "log.txt"];};
+          };
+          th10 = {
+            mutable = { type = "relative"; paths = ["th10.cfg" "scoreth10.dat" "replay/" "log.txt"];};
+          };
+          th11 = {
+            mutable = { type = "relative"; paths = ["th11.cfg" "scoreth11.dat" "replay/" "log.txt"];};
+          };
+          th12 = {
+            mutable = { type = "relative"; paths = ["th12.cfg" "scoreth12.dat" "replay/" "log.txt"];};
+          };
+          th125 = {
+            mutable = { type = "appdata"; };
+          };
+          th128 = {
+            mutable = { type = "appdata"; };
+          };
+          th13 = {
+            mutable = { type = "appdata"; };
+          };
+          th14 = {
+            mutable = { type = "appdata"; };
+          };
+          th143 = {
+            mutable = { type = "appdata"; };
+          };
+          th15 = {
+            mutable = { type = "appdata"; };
+          };
+          th16 = {
+            mutable = { type = "appdata"; };
+          };
+          th165 = {
+            mutable = { type = "appdata"; };
+          };
+          th17 = {
+            mutable = { type = "appdata"; };
+          };
+          th18 = {
+            mutable = { type = "appdata"; };
+          };
+          th185 = {
+            mutable = { type = "appdata"; };
+          };
+        };
         makeWinePrefix = {
           defaultFont? "Noto Sans CJK SC",
           fontPackage?  pkgs.noto-fonts-cjk-sans
@@ -55,7 +114,9 @@
         }: 
 
         pkgs.callPackage ({stdenvNoCC, lib, bash, makeWrapper, writeScript, wine, bubblewrap, iconv, dxvk}: 
+        assert (builtins.hasAttr thVersion touhouMetadata);
         let pkgname = "${name}-wrapper";
+        metadata = touhouMetadata."${thVersion}";
         in
         stdenvNoCC.mkDerivation {
           name = pkgname;
@@ -67,7 +128,7 @@
           thcrapConfigPath = if thcrapPatches != null then thcrapDown {
             sha256 = thcrapSha256;
             patches = thcrapPatches;
-            games = [thVersion];
+            games = [thVersion "${thVersion}_custom"];
           } else "";
           thpracPath = if enableThprac then thprac else "";
           vpatchPath = if enableVpatch then vpatch else "";
@@ -91,8 +152,22 @@
             wineprefixMount="--ro-bind $WINEPREFIX /opt/wineprefix"
           fi
           mkdir -p "$mutableBase"
-          touch "$mutableBase/score.dat"
-          touch "$mutableBase/${thVersion}.cfg"
+          ${
+          if metadata.mutable.type=="relative" then
+          ''
+          for f in ${builtins.toString metadata.mutable.paths}; do
+            if [[ "$f" =~ .*/ ]]; then 
+              mkdir -p "$mutableBase/$f"
+            else
+              touch "$mutableBase/$f"
+            fi
+          done
+          ''
+          else
+          ''
+          mkdir -p "$mutableBase/appdata"
+          ''
+          }
           thcrapMount=""
           vpatchMount=""
           thpracMount=""
@@ -108,16 +183,28 @@
             thpracMount="--ro-bind \"$wrapperRoot/thprac.exe\" /opt/touhou/thprac.exe"
           fi
           touhouBaseMount=""
+          touhouBaseMountMethod="--ro-bind"
+          if ! [ -z $MUTABLE_TOUHOU_ROOT ]; then
+            touhouBaseMountMethod="--bind"
+          fi
           for f in "$touhouRoot/"*; do
             fbase=$(basename "$f")
-            touhouBaseMount="--ro-bind \"$f\" \"/opt/touhou/$fbase\" $touhouBaseMount"
+            touhouBaseMount="$touhouBaseMountMethod \"$f\" \"/opt/touhou/$fbase\" $touhouBaseMount"
           done
-          mutableMount="--bind \"$mutableBase/score.dat\" /opt/touhou/score.dat --bind \"$mutableBase/${thVersion}.cfg\" /opt/touhou/${thVersion}.cfg"
-          if [ ${thVersion} == "th18" ]; then
-            mkdir -p "$mutableBase/appdata"
-            mutableMount="--bind \"$mutableBase/appdata\" /opt/ShanghaiAlice/th18"
-          fi
-          bash -c "LAUNCH_WITH_BWRAP=1 XAUTHORITY=/opt/.Xauthority WINEPREFIX=/opt/wineprefix ${bubblewrap}/bin/bwrap \
+          ${
+          if metadata.mutable.type=="relative" then
+          ''
+          mutableMount=""
+          for f in ${builtins.toString metadata.mutable.paths}; do
+            mutableMount="--bind \"$mutableBase/$f\" \"/opt/touhou/$f\" $mutableMount"
+          done
+          ''
+          else
+          ''
+          mutableMount="--bind \"$mutableBase/appdata\" /opt/ShanghaiAlice/${thVersion}"
+          ''
+          }
+          cmd="LAUNCH_WITH_BWRAP=1 XAUTHORITY=/opt/.Xauthority WINEPREFIX=/opt/wineprefix ${bubblewrap}/bin/bwrap \
             --ro-bind /nix /nix --proc /proc --dev-bind /dev /dev --bind /sys /sys --tmpfs /tmp --tmpfs /opt \
             $wineprefixMount \
             --ro-bind $XAUTHORITY /opt/.Xauthority \
@@ -126,6 +213,8 @@
             $touhouBaseMount $thcrapMount $thpracMount $vpatchMount $mutableMount \
             --chdir /opt/touhou \
             $wrapperPath/bin/${pkgname}-raw"
+          echo "$cmd"
+          bash -c "$cmd"
           '';
           launcherScript = writeScript "${pkgname}-script" ''
           #!${bash}/bin/bash
@@ -169,25 +258,44 @@
             #${dxvk}/bin/setup_dxvk.sh install
             #echo dxvk installed.
           fi
+          # By now, wineprefix should be mutable.
+          mkdir -p $WINEPREFIX
           # Set executable.
           if ! [ -z $enableThprac ]; then
             gameExe="thprac.exe" # thprac.exe can find vpatch on its own.
           elif ! [ -z $enableVpatch ]; then
             gameExe="vpatch.exe"
           fi
-          if ! [ -e "$LAUNCHPATH/$gameExe" ]; then
-            echo "gameExe not found: $gameExe"
-            exit 1
-          fi
-          if ! [ -z $enableThcrap ]; then
-            if ! [ -z $LAUNCH_WITH_BWRAP ]; then
-              cd /opt/thcrap
-            else
-              cd "$wrapperRoot/thcrap"
+          if [ -z $RUN_CUSTOM ]; then
+            if ! [ -e "$LAUNCHPATH/$gameExe" ]; then
+              echo "gameExe not found: $gameExe"
+              exit 1
             fi
-            ${wine}/bin/wine bin/thcrap_loader.exe thcrap2nix.js "$LAUNCHPATH/$gameExe"
+            if ! [ -z $enableThcrap ]; then
+              if ! [ -z $LAUNCH_WITH_BWRAP ]; then
+                cd /opt/thcrap
+              else
+                cd "$wrapperRoot/thcrap"
+              fi
+              ${wine}/bin/wine bin/thcrap_loader.exe thcrap2nix.js "$LAUNCHPATH/$gameExe"
+            else
+              ${wine}/bin/wine "$LAUNCHPATH/$gameExe"
+            fi
           else
-            ${wine}/bin/wine "$LAUNCHPATH/$gameExe"
+            if ! [ -e "$LAUNCHPATH/custom.exe" ]; then
+              echo "custom.exe not found."
+              exit 1
+            fi
+            if ! [ -z $enableThcrap ]; then
+              if ! [ -z $LAUNCH_WITH_BWRAP ]; then
+                cd /opt/thcrap
+              else
+                cd "$wrapperRoot/thcrap"
+              fi
+              ${wine}/bin/wine bin/thcrap_loader.exe thcrap2nix.js "$LAUNCHPATH/custom.exe"
+            else
+              ${wine}/bin/wine "$LAUNCHPATH/custom.exe"
+            fi
           fi
           '';
           installPhase = ''
@@ -238,12 +346,17 @@
             version = "2015-11-28";
             src = fetchurl {
               url = "https://maribelhearn.com/mirror/VsyncPatch.zip";
-              sha256 = "sha256-XVmbdzF6IIpRWQiKAujWzy6cmA8llG34jkqUb29Ec44=";
+              sha256 = "XVmbdzF6IIpRWQiKAujWzy6cmA8llG34jkqUb29Ec44=";
               # https://web.archive.org/web/20220824223436if_/https://maribelhearn.com/mirror/VsyncPatch.zip
+            };
+            srcthcrap = fetchurl {
+              url = "https://www.thpatch.net/w/images/1/1a/vpatch_th06_unicode.zip";
+              sha256 = "06x8gQNmz8UZVIt6hjUJHvpWS3SVz0iWG2kqJIBN9M4=";
             };
             nativeBuildInputs = [unzip];
             unpackPhase = ''
               unzip $src
+              unzip $srcthcrap
             '';
             installPhase = ''
               mkdir -p $out/bin
@@ -254,6 +367,7 @@
               cp vpatch/vpatch_th13/*.dll $out/bin
               cp vpatch/vpatch_th14/*.dll $out/bin
               cp vpatch/vpatch_th15/*.dll $out/bin
+              cp vpatch_th06_unicode.dll $out/bin/vpatch_th06.dll
             '';
           }
         ) {};
@@ -281,6 +395,8 @@
         };
         thcrapPatches = {
           lang_zh-hans = {repo_id = "thpatch"; patch_id = "lang_zh-hans";};
+          lang_en = {repo_id = "thpatch"; patch_id = "lang_en";};
+          EoSD_Retexture_Hitbox = {repo_id = "WindowDump"; patch_id = "EoSD_Retexture_Hitbox";};
         };
         thcrapDown = { sha256? "", patches, games}: 
           let cfg = {patches = patches thcrapPatches; inherit games;}; 
@@ -311,9 +427,9 @@
               wine wineboot
               echo "Wineboot finished."
               export RUST_LOG=trace
-              export http_proxy=garbage://site
-              export https_proxy=garbage://site
-              export NO_PROXY="thpatch.net,thpatch.rcopky.top"
+              export patch_http_proxy=garbage://site
+              export patch_https_proxy=garbage://site
+              export patch_NO_PROXY="thpatch.net,thpatch.rcopky.top"
               wine $BUILD/bin/thcrap2nix.exe ${cfgFile}
               mkdir -p $out/config
               cp -r $BUILD/repos $out
@@ -329,20 +445,25 @@
           games = ["th16"];
           sha256 = "xHX3FIjaG5epe+N3oLkyP4L7h01eYjiHjTXU39QuSpA=";
         };
+        th06 = touhouTools.makeTouhouOverlay {
+          thVersion = "th06";
+          thcrapPatches = (p: with p; [EoSD_Retexture_Hitbox lang_zh-hans lang_en]);
+          thcrapSha256 = "o/vce/9bDqH6hvuvmZWMhOfXd4EJ2klw0BGAEu47HZI=";
+        };
         th07 = touhouTools.makeTouhouOverlay {
           thVersion = "th07";
-          thcrapPatches = (p: with p; [lang_zh-hans]);
-          thcrapSha256 = "6Z32LxSWnAZRe7zeCsABQUNSfXOoLoaKdnpZrg4a9Fc=";
+          thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
+          thcrapSha256 = "";
         };
         th10 = touhouTools.makeTouhouOverlay {
           thVersion = "th10";
-          thcrapPatches = (p: with p; [lang_zh-hans]);
-          thcrapSha256 = "c2ixIvUFFZCWnuCNM/T6a08bYv6dwUJFbbhCccFLNj8=";
+          thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
+          thcrapSha256 = "";
         };
         th18 = touhouTools.makeTouhouOverlay {
           thVersion = "th18";
-          thcrapPatches = (p: with p; [lang_zh-hans]);
-          thcrapSha256 = "U6ZmBefxTsRm+kuzga/KzQN5FAg381d9/CZMczY59ss=";
+          thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
+          thcrapSha256 = "";
         };
       };
 

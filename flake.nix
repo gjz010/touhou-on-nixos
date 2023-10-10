@@ -99,6 +99,7 @@
           wineserver --wait || true
           echo "${defaultFont}" > $out/share/wineprefix/default_font.txt
           find ${fontPackage} -type f -name "*.ttc" -exec cp {} $out/share/wineprefix/drive_c/windows/Fonts/ \;
+          find ${fontPackage} -type f -name "*.ttf" -exec cp {} $out/share/wineprefix/drive_c/windows/Fonts/ \;
           '';
         }) {});
         defaultWinePrefix = makeWinePrefix {};
@@ -139,6 +140,7 @@
           enableBase = baseDrv!=null;
           launcherScriptBwrap = writeScript "${pkgname}-script-bwrap" ''
           #!${bash}/bin/bash
+          WINEPREFIX=$OVERRIDE_WINEPREFIX
           export PATH=${wine}/bin:$PATH
           touhouRoot="$wrapperRoot/base"
           mutableBase="$HOME/.config/.touhou-on-nixos/${name}"
@@ -159,6 +161,12 @@
             if [[ "$f" =~ .*/ ]]; then 
               mkdir -p "$mutableBase/$f"
             else
+              if ! [ -e "$mutableBase/$f" ]; then
+                if [ -e "$touhouRoot/$f" ]; then
+                  echo "Copying $f from touhouRoot."
+                  cp "$touhouRoot/$f" "$mutableBase/$f"
+                fi
+              fi
               touch "$mutableBase/$f"
             fi
           done
@@ -176,6 +184,12 @@
             thcrapMount="--ro-bind \"$wrapperRoot/thcrap\" /opt/thcrap/ --bind \"$mutableBase/thcrap-logs\" /opt/thcrap/logs"
           fi
           if ! [ -z $enableVpatch ]; then
+            if ! [ -e "$mutableBase/vpatch.ini" ]; then
+              if [ -e "$touhouRoot/vpatch.ini" ]; then
+                echo "Copying vpatch.ini from touhouRoot."
+                cp "$touhouRoot/vpatch.ini" "$mutableBase/vpatch.ini"
+              fi
+            fi
             touch "$mutableBase/vpatch.ini"
             vpatchMount="--ro-bind \"$wrapperRoot/vpatch.exe\" /opt/touhou/vpatch.exe --ro-bind \"$wrapperRoot/vpatch_${thVersion}.dll\" /opt/touhou/vpatch_${thVersion}.dll --bind \"$mutableBase/vpatch.ini\" /opt/touhou/vpatch.ini"
           fi
@@ -453,12 +467,17 @@
         th07 = touhouTools.makeTouhouOverlay {
           thVersion = "th07";
           thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
-          thcrapSha256 = "";
+          thcrapSha256 = "/4yNd+r0P+uttIrkTaxItmG5UGrWqk5bq4b2sOD/RDM=";
+        };
+        th08 = touhouTools.makeTouhouOverlay {
+          thVersion = "th08";
+          thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
+          thcrapSha256 = "lPrCzNQqvFRJaHX+eYKladopCMVBnTcS+fnHYG0Y468=";
         };
         th10 = touhouTools.makeTouhouOverlay {
           thVersion = "th10";
           thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
-          thcrapSha256 = "";
+          thcrapSha256 = "Quc94iqcdfudcJpboUL6PxJTgHk2mzCEumoXM5QB2qM=";
         };
         th18 = touhouTools.makeTouhouOverlay {
           thVersion = "th18";

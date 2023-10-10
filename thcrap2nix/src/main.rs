@@ -161,6 +161,7 @@ fn main() {
     let file_list: Mutex<Vec<String>> = Mutex::new(Vec::new());
     let touched_file_list: Mutex<Vec<String>> = Mutex::new(Vec::new());
     let has_error = std::sync::atomic::AtomicBool::new(false);
+    let error_logs = Mutex::new(Vec::new());
     thcrap.stack_update_wrapper(
         |name| {
             let mut xs = file_list.lock().unwrap();
@@ -200,21 +201,31 @@ fn main() {
                 }
                 get_status_t_GET_CLIENT_ERROR => {
                     let error = str_from_pi8_nul_utf8(prog.error).unwrap();
-                    error!("{} {} Client error {}", patch, file, error);
+                    let msg = format!("{} {} Client error {}", patch, file, error);
+                    error!("{}", &msg);
+                    {let mut lock = error_logs.lock().unwrap(); lock.push(msg);}
                     has_error.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
                 get_status_t_GET_SERVER_ERROR => {
                     let error = str_from_pi8_nul_utf8(prog.error).unwrap();
-                    error!("{} {} Server error {}", patch, file, error);
+                    let url = str_from_pi8_nul_utf8(prog.url).unwrap();
+                    let msg = format!("{} {} Server error {} {}", patch, file, error, url);
+                    error!("{}", &msg);
+                    {let mut lock = error_logs.lock().unwrap(); lock.push(msg);}
                     has_error.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
                 get_status_t_GET_SYSTEM_ERROR => {
                     let error = str_from_pi8_nul_utf8(prog.error).unwrap();
-                    error!("{} {} System error {}", patch, file, error);
+                    let url = str_from_pi8_nul_utf8(prog.url).unwrap();
+                    let msg = format!("{} {} System error {} {}", patch, file, error, url);
+                    error!("{}", &msg);
+                    {let mut lock = error_logs.lock().unwrap(); lock.push(msg);}
                     has_error.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
                 get_status_t_GET_CRC32_ERROR => {
-                    error!("{} {} CRC32 error", patch, file);
+                    let msg = format!("{} {} CRC32 error", patch, file);
+                    error!("{}", &msg);
+                    {let mut lock = error_logs.lock().unwrap(); lock.push(msg);}
                     has_error.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
                 get_status_t_GET_CANCELLED => {
@@ -227,6 +238,9 @@ fn main() {
     );
     if has_error.load(std::sync::atomic::Ordering::Relaxed) {
         error!("Failure detected while downloading.");
+        for log in error_logs.into_inner().unwrap().into_iter(){
+            error!("{}", log);
+        }
         std::process::exit(3);
     }
     archives.reverse();

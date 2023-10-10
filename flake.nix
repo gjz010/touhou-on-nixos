@@ -152,7 +152,7 @@
           WINEPREFIX=$OVERRIDE_WINEPREFIX
           export PATH=${wine}/bin:$PATH
           touhouRoot="$wrapperRoot/base"
-          mutableBase="$HOME/.config/.touhou-on-nixos/${name}"
+          mutableBase="$HOME/.config/touhou-on-nixos/${name}"
           if [ -z "$enableBase" ]; then
             touhouRoot="$PWD"
           fi

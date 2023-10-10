@@ -79,6 +79,9 @@
           th185 = {
             mutable = { type = "appdata"; };
           };
+          th19 = {
+            mutable = { type = "appdata"; };
+          };
         };
         makeWinePrefix = {
           defaultFont? "Noto Sans CJK SC",
@@ -118,6 +121,11 @@
         assert (builtins.hasAttr thVersion touhouMetadata);
         let pkgname = "${name}-wrapper";
         metadata = touhouMetadata."${thVersion}";
+        setAppdata = appdata: writeScript "setappdata-and-run" ''
+        @echo off
+        set APPDATA=${appdata}
+        start "" %*
+        '';
         in
         stdenvNoCC.mkDerivation {
           name = pkgname;
@@ -130,6 +138,7 @@
             sha256 = thcrapSha256;
             patches = thcrapPatches;
             games = [thVersion "${thVersion}_custom"];
+            name = thVersion;
           } else "";
           thpracPath = if enableThprac then thprac else "";
           vpatchPath = if enableVpatch then vpatch else "";
@@ -280,6 +289,7 @@
           elif ! [ -z $enableVpatch ]; then
             gameExe="vpatch.exe"
           fi
+          cp ${setAppdata "z:/opt/"} /opt/launch.bat
           if [ -z $RUN_CUSTOM ]; then
             if ! [ -e "$LAUNCHPATH/$gameExe" ]; then
               echo "gameExe not found: $gameExe"
@@ -291,9 +301,9 @@
               else
                 cd "$wrapperRoot/thcrap"
               fi
-              ${wine}/bin/wine bin/thcrap_loader.exe thcrap2nix.js "$LAUNCHPATH/$gameExe"
+              ${wine}/bin/wine /opt/launch.bat bin/thcrap_loader.exe thcrap2nix.js "$LAUNCHPATH/$gameExe"
             else
-              ${wine}/bin/wine "$LAUNCHPATH/$gameExe"
+              ${wine}/bin/wine /opt/launch.bat "$LAUNCHPATH/$gameExe"
             fi
           else
             if ! [ -e "$LAUNCHPATH/custom.exe" ]; then
@@ -412,12 +422,12 @@
           lang_en = {repo_id = "thpatch"; patch_id = "lang_en";};
           EoSD_Retexture_Hitbox = {repo_id = "WindowDump"; patch_id = "EoSD_Retexture_Hitbox";};
         };
-        thcrapDown = { sha256? "", patches, games}: 
+        thcrapDown = { name, sha256? "", patches, games}: 
           let cfg = {patches = patches thcrapPatches; inherit games;}; 
           cfgFile = pkgs.writeText "thcrap2nix.json" (builtins.toJSON cfg);
           in
           pkgs.stdenvNoCC.mkDerivation {
-            name = "thcrap-config";
+            name = "thcrap-config-${name}";
             nativeBuildInputs = [pkgs.wine];
             outputHashMode = "recursive";
             outputHashAlgo = "sha256";
@@ -455,10 +465,13 @@
       };
       examples = {
         thcrapDownExample = touhouTools.thcrapDown {
+          name = "example";
           patches = (p: with p; [lang_zh-hans]);
           games = ["th16"];
           sha256 = "xHX3FIjaG5epe+N3oLkyP4L7h01eYjiHjTXU39QuSpA=";
         };
+      };
+      zh_CN = {
         th06 = touhouTools.makeTouhouOverlay {
           thVersion = "th06";
           thcrapPatches = (p: with p; [EoSD_Retexture_Hitbox lang_zh-hans lang_en]);
@@ -474,18 +487,63 @@
           thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
           thcrapSha256 = "lPrCzNQqvFRJaHX+eYKladopCMVBnTcS+fnHYG0Y468=";
         };
+        th09 = touhouTools.makeTouhouOverlay {
+          thVersion = "th09";
+          thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
+          thcrapSha256 = "WWU8j9XtubFlab7zQ3kUK++vbAImPjKtlD+dxrsH3jc=";
+        };
         th10 = touhouTools.makeTouhouOverlay {
           thVersion = "th10";
           thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
           thcrapSha256 = "Quc94iqcdfudcJpboUL6PxJTgHk2mzCEumoXM5QB2qM=";
         };
+        th11 = touhouTools.makeTouhouOverlay {
+          thVersion = "th11";
+          thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
+          thcrapSha256 = "RM+N/GYuRJpgXVcMAVAR8uwRL9l3hfp/g3FCNB5eMRs=";
+        };
+        th12 = touhouTools.makeTouhouOverlay {
+          thVersion = "th12";
+          thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
+          thcrapSha256 = "hXJVsq3Ha+whczB+yorWdpj6fVWB3WYoMRHOt/ug3PI=";
+        };
+        th13 = touhouTools.makeTouhouOverlay {
+          thVersion = "th13";
+          thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
+          thcrapSha256 = "T6CR9j6gwsPy0tSMJYzAkln6VVq5F1/VVg/nKSK/kpg=";
+        };
+        th14 = touhouTools.makeTouhouOverlay {
+          thVersion = "th14";
+          thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
+          thcrapSha256 = "JSzdEWpdgKpSa4t+ymsQCAKbHQt1+TYzBx29FmnGxvE=";
+        };
+        th15 = touhouTools.makeTouhouOverlay {
+          thVersion = "th15";
+          thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
+          thcrapSha256 = "4AvJHQ+XHtBb6AdeyCDuyykxtqwMc38Bx1gWCu6WDso=";
+        };
+        th16 = touhouTools.makeTouhouOverlay {
+          thVersion = "th16";
+          thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
+          thcrapSha256 = "HYagDCpD70uU7/kiI8+h8NYRxS4G9C+mXf/6KMovbe0=";
+        };
+        th17 = touhouTools.makeTouhouOverlay {
+          thVersion = "th17";
+          thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
+          thcrapSha256 = "jwOEw9ce2+sJQYDJ4hz6VendJOfIub4Myuh+xc4g0qU=";
+        };
         th18 = touhouTools.makeTouhouOverlay {
           thVersion = "th18";
           thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
-          thcrapSha256 = "";
+          thcrapSha256 = "sfpYFWlTTALCgcrya2cewXWIkMQIXTT0RVvTw9WnO5Y=";
         };
-      };
+        th19 = touhouTools.makeTouhouOverlay {
+          thVersion = "th19";
+          thcrapPatches = (p: with p; [lang_zh-hans lang_en]);
+          thcrapSha256 = "xWWuEjt5+dfB2LqQiLRGeHYMZGyPgAub6rjgVlRbkfk=";
+        };
 
+      };
     };
 
     packages.x86_64-linux.hello = nixpkgs.legacyPackages.x86_64-linux.hello;

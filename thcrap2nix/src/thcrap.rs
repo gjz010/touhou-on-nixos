@@ -74,8 +74,16 @@ impl<'a> PatchDesc<'a> {
     pub fn absolute(&self) -> bool {
         self.patchdesc.repo_id != null_mut()
     }
-
     pub fn load_patch(&self, repo: &'a THRepo<'a>) -> (String, Patch<'a>) {
+        unsafe{
+            let patch_id = str_from_pi8_nul_utf8(self.patchdesc.patch_id).unwrap();
+            let server = repo.servers();
+            info!("Stage 1 for {}/{} patch_bootstrap url: {}", 
+            str_from_pi8_nul_utf8(self.patchdesc.repo_id).unwrap(),
+            patch_id,
+            format!("{}{}/patch.js", &server[0],&patch_id)
+            );
+        };
         let mut p1 = (self.dll.pf_patch_bootstrap_wrapper)(
             &self.patchdesc as *const _,
             repo.repo as *const _,
@@ -116,6 +124,12 @@ impl<'a> Patch<'a> {
     }
     pub fn add_to_stack(&mut self) -> () {
         (self.repo.thcrap.pf_stack_add_patch)(&mut self.patch as *const _ as *mut _);
+    }
+    pub fn servers(&self)->Vec<String>{
+        unsafe{
+            let servers_list : *mut *mut c_char = self.patch.servers;
+            list_str_from_pi8_nul_utf8(servers_list as *const *const _).unwrap().into_iter().map(|s| s.to_string()).collect()
+        }
     }
     pub fn dependencies(&self) -> Vec<PatchDesc<'a>> {
         let mut descs = vec![];
@@ -163,6 +177,25 @@ impl<'a> THRepo<'a> {
         unsafe {
             let cstr = CStr::from_ptr(repo.id);
             str_from_u8_nul_utf8(cstr.to_bytes()).unwrap()
+        }
+    }
+    pub fn remove_lilywhite_cc(&self){
+        unsafe{
+            let servers_list : *mut *mut c_char = (*self.repo).servers;
+            let mut servers_str_list = list_str_from_pi8_nul_utf8(servers_list as *const *const _).unwrap();
+            assert!(servers_str_list.len() > 0);
+            servers_str_list.retain(|s| !s.contains("lilywhite.cc"));
+            // TODO: fix this leak
+            for i in 0..servers_str_list.len(){
+                servers_list.offset(i as isize).write(servers_str_list[i].as_ptr() as *mut _);
+            }
+            servers_list.offset(servers_str_list.len() as isize).write(null_mut());
+        }
+    }
+    pub fn servers(&self) -> Vec<String>{
+        unsafe{
+            let servers_list : *mut *mut c_char = (*self.repo).servers;
+            list_str_from_pi8_nul_utf8(servers_list as *const *const _).unwrap().into_iter().map(|s| s.to_string()).collect()
         }
     }
     pub fn patches(&'a self) -> Vec<(&'a str, PatchDesc<'a>)> {

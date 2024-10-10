@@ -1,7 +1,7 @@
 {
   description = "A very basic flake";
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
     gitignore = {
@@ -19,6 +19,8 @@
   in 
   {
     packages.x86_64-linux = rec {
+      default = thcrap2nix;
+
       thcrap2nix = pkgsWin.callPackage ./thcrap2nix {winePackageNative = pkgs.winePackages.staging; inherit gitignoreSource; };
       touhouTools = rec {
         touhouMetadata = {
@@ -85,9 +87,10 @@
         };
         makeWinePrefix = {
           defaultFont? "Noto Sans CJK SC",
-          fontPackage?  pkgs.noto-fonts-cjk-sans
+          fontPackage?  pkgs.noto-fonts-cjk-sans,
+          wine? pkgs.wine
         }:
-        (pkgs.callPackage ({stdenvNoCC, wine, pkgsCross, bash}:  stdenvNoCC.mkDerivation {
+        (pkgs.callPackage ({stdenvNoCC, pkgsCross, bash}:  stdenvNoCC.mkDerivation {
           name = "touhou-wineprefix";
           nativeBuildInputs = [wine];
           phases = ["installPhase"];
@@ -97,7 +100,7 @@
           wineboot -i
           wineserver --wait || true
           echo Setting up dxvk.
-          dxvk32_dir=${pkgsCross.mingw32.dxvk_2}/bin mcfgthreads32_dir=${pkgsCross.mingw32.windows.mcfgthreads_pre_gcc_13}/bin ${bash}/bin/bash ${./setup_dxvk.sh}
+          dxvk32_dir=${pkgsCross.mingw32.dxvk_2}/bin mcfgthreads32_dir=${pkgsCross.mingw32.windows.mcfgthreads}/bin ${bash}/bin/bash ${./setup_dxvk.sh}
           echo dxvk installed.
           wineserver --wait || true
           echo "${defaultFont}" > $out/share/wineprefix/default_font.txt
@@ -114,10 +117,12 @@
           thcrapPatches? null,
           thcrapSha256? "",
           baseDrv? null,
-          winePrefix? defaultWinePrefix
+          winePrefixConfig? {},
+          wine? pkgs.wine
         }: 
+        let winePrefix = makeWinePrefix winePrefixConfig; in
 
-        pkgs.callPackage ({stdenvNoCC, lib, bash, makeWrapper, writeScript, wine, bubblewrap, iconv, dxvk}: 
+        pkgs.callPackage ({stdenvNoCC, lib, bash, makeWrapper, writeScript, bubblewrap, iconv, dxvk}: 
         assert (builtins.hasAttr thVersion touhouMetadata);
         let pkgname = "${name}-wrapper";
         metadata = touhouMetadata."${thVersion}";
@@ -126,20 +131,26 @@
         set APPDATA=${appdata}
         start "" %*
         '';
+        thcrapConfigPath = if thcrapPatches != null then thcrapDown {
+            sha256 = thcrapSha256;
+            patches = thcrapPatches;
+            games = [thVersion "${thVersion}_custom"];
+            name = thVersion;
+          } else "";
         in
         stdenvNoCC.mkDerivation {
+
+          passthru = {
+            thcrapConfig = thcrapConfigPath;
+          };
+
           name = pkgname;
           gameExe = "${thVersion}.exe";
           inherit thVersion;
           phases = ["installPhase"];
           nativeBuildInputs = [makeWrapper];
           thcrapPath = if thcrapPatches != null then thcrap else "";
-          thcrapConfigPath = if thcrapPatches != null then thcrapDown {
-            sha256 = thcrapSha256;
-            patches = thcrapPatches;
-            games = [thVersion "${thVersion}_custom"];
-            name = thVersion;
-          } else "";
+          inherit thcrapConfigPath;
           thpracPath = if enableThprac then thprac else "";
           vpatchPath = if enableVpatch then vpatch else "";
           baseDrv = if baseDrv!=null then baseDrv else "";
@@ -189,7 +200,7 @@
           vpatchMount=""
           thpracMount=""
           if ! [ -z $enableThcrap ]; then
-            mkdir "$mutableBase/thcrap-logs"
+            mkdir -p "$mutableBase/thcrap-logs"
             thcrapMount="--ro-bind \"$wrapperRoot/thcrap\" /opt/thcrap/ --bind \"$mutableBase/thcrap-logs\" /opt/thcrap/logs"
           fi
           if ! [ -z $enableVpatch ]; then
@@ -440,20 +451,22 @@
               export WINEPREFIX=$BUILD/.wine
               mkdir -p $BUILD/bin
               for i in ${thcrap}/bin/*; do
+                echo ln -s $i $BUILD/bin/
                 ln -s $i $BUILD/bin/
               done
               cp -r ${thcrap}/repos $BUILD
               chmod -R 777 $BUILD/repos
               for i in ${thcrap2nix}/bin/*; do
+                echo ln -s $i $BUILD/bin/
                 ln -s $i $BUILD/bin/
               done
-              ln -s ${pkgsWin.jansson}/bin/libgcc* $BUILD/bin/
+              ln -s ${pkgsWin.jansson.out}/bin/libgcc* $BUILD/bin/
               wine wineboot
               echo "Wineboot finished."
               export RUST_LOG=trace
               export patch_http_proxy=garbage://site
               export patch_https_proxy=garbage://site
-              export patch_NO_PROXY="thpatch.net,thpatch.rcopky.top"
+              export patch_NO_PROXY=".thpatch.net,.thpatch.rcopky.top,.lilywhite.cc"
               wine $BUILD/bin/thcrap2nix.exe ${cfgFile}
               mkdir -p $out/config
               cp -r $BUILD/repos $out
@@ -470,12 +483,17 @@
           games = ["th16"];
           sha256 = "xHX3FIjaG5epe+N3oLkyP4L7h01eYjiHjTXU39QuSpA=";
         };
+        jansson = pkgsWin.jansson;
+        th06_thcrap = self.packages.x86_64-linux.zh_CN.th06.passthru.thcrapConfig;
       };
       zh_CN = {
         th06 = touhouTools.makeTouhouOverlay {
           thVersion = "th06";
           thcrapPatches = (p: with p; [EoSD_Retexture_Hitbox lang_zh-hans lang_en]);
-          thcrapSha256 = "o/vce/9bDqH6hvuvmZWMhOfXd4EJ2klw0BGAEu47HZI=";
+          thcrapSha256 = "Uu0pcs3CfM5MFGAfcoHxdxxmQngXQTSmoshX/8BXHo8=";
+          #wine = pkgs.winePackages.wayland;
+          #thcrapSha256 = "LnJ/VjSX9t6tMGb2BudCsX4F3JqUaNNQLa7Rs86i3tM=";
+          #thcrapSha256 = "+EOgxsBEEBb5LjchMfRDYDtR4KAIO/mEkijJdBiv0ck=";
         };
         th07 = touhouTools.makeTouhouOverlay {
           thVersion = "th07";
@@ -546,19 +564,15 @@
       };
     };
 
-    packages.x86_64-linux.hello = nixpkgs.legacyPackages.x86_64-linux.hello;
-
-    packages.x86_64-linux.default = self.packages.x86_64-linux.hello;
     devShells.x86_64-linux.default = 
       pkgsWin.callPackage ({mkShell, stdenv, rust-bin, windows, jansson}: mkShell {
           #buildInputs = [pkgs.rust-bin.stable.latest.minimal];
           #CARGO_TARGET_I686_PC_WINDOWS_GNU_LINKER = "${stdenv.cc.targetPrefix}cc";
-          nativeBuildInputs = [ pkgsWin.pkgsBuildHost.rust-bin.stable.latest.complete pkgs.libclang pkgs.winePackages.staging];
+          nativeBuildInputs = [ pkgs.nodejs_20 pkgsWin.pkgsBuildHost.rust-bin.stable.latest.complete pkgs.libclang pkgs.winePackages.wayland];
           buildInputs = [ windows.pthreads windows.mcfgthreads stdenv.cc.libc jansson];
           LIBCLANG_PATH="${pkgs.libclang.lib}/lib";
           WINEPATH="${jansson}/bin;${windows.mcfgthreads}/bin;../thcrap/bin";
           HOST_SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
       }) {};
-
   };
 }

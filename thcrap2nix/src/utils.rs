@@ -16,6 +16,19 @@ pub unsafe fn str_from_pi8_nul_utf8<'a>(p: *const i8) -> Result<&'a str, std::st
     str_from_u8_nul_utf8(cstr.to_bytes())
 }
 
+pub unsafe fn list_str_from_pi8_nul_utf8<'a>(mut p: *const *const i8) -> Result<Vec<&'a str>, std::str::Utf8Error> {
+    if p == null() {
+        return Ok(vec![]);
+    }
+    let mut xs = vec![];
+    let list = p;
+    while *p != null(){
+        xs.push(str_from_pi8_nul_utf8(*p)?);
+        p = p.add(1); 
+    }
+    Ok(xs)
+}
+
 pub trait ToResult: Sized {
     fn to_result(&self) -> Result<Self, Error>;
 }
